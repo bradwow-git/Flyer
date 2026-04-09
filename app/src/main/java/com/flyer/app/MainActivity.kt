@@ -249,7 +249,7 @@ fun NowPlayingBar(track: TrackFile, isPlaying: Boolean, onPlayPause: () -> Unit)
                 )
             }
             TextButton(onClick = onPlayPause) {
-                Text(text = if (isPlaying) "Pause" else "Play")
+                Text(text = if (isPlaying) "⏸" else "▶")
             }
         }
     }
