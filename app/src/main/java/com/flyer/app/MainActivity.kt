@@ -92,10 +92,21 @@ fun FlyerApp(controller: MediaController?) {
     var currentTrack by remember { mutableStateOf<TrackFile?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
 
-    DisposableEffect(controller) {
+    val tracks by AppDatabase.getInstance(context)
+        .trackDao()
+        .getAllTracks()
+        .collectAsState(initial = emptyList())
+
+    DisposableEffect(controller, tracks) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
+            }
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                val uriString = mediaItem?.localConfiguration?.uri?.toString()
+                currentTrack = tracks.find {
+                    Uri.fromFile(File(it.filePath)).toString() == uriString
+                }
             }
         }
         controller?.addListener(listener)
@@ -114,10 +125,7 @@ fun FlyerApp(controller: MediaController?) {
         }
     }
 
-    val tracks by AppDatabase.getInstance(context)
-        .trackDao()
-        .getAllTracks()
-        .collectAsState(initial = emptyList())
+
 
     LaunchedEffect(hasPermission) {
         if (hasPermission) {
@@ -138,7 +146,9 @@ fun FlyerApp(controller: MediaController?) {
                     onPlayPause = {
                         if (controller?.isPlaying == true) controller.pause()
                         else controller?.play()
-                    }
+                    },
+                    onNext = { controller?.seekToNextMediaItem() },
+                    onPrevious = { controller?.seekToPreviousMediaItem() }
                 )
             }
         }
@@ -185,13 +195,14 @@ fun FlyerApp(controller: MediaController?) {
                             track = track,
                             isCurrentTrack = track.id == currentTrack?.id,
                             onClick = {
-                                currentTrack = track
-                                val mediaItem = MediaItem.fromUri(
-                                    Uri.fromFile(File(track.filePath))
-                                )
-                                controller?.setMediaItem(mediaItem)
+                                val mediaItems = tracks.map { t ->
+                                    MediaItem.fromUri(Uri.fromFile(File(t.filePath)))
+                                }
+                                val startIndex = tracks.indexOf(track)
+                                controller?.setMediaItems(mediaItems, startIndex, 0L)
                                 controller?.prepare()
                                 controller?.play()
+                                currentTrack = track
                             }
                         )
                     }
@@ -224,7 +235,13 @@ fun TrackRow(track: TrackFile, isCurrentTrack: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun NowPlayingBar(track: TrackFile, isPlaying: Boolean, onPlayPause: () -> Unit) {
+fun NowPlayingBar(
+    track: TrackFile,
+    isPlaying: Boolean,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit
+) {
     Surface(
         tonalElevation = 8.dp,
         shadowElevation = 8.dp
@@ -248,9 +265,9 @@ fun NowPlayingBar(track: TrackFile, isPlaying: Boolean, onPlayPause: () -> Unit)
                     maxLines = 1
                 )
             }
-            TextButton(onClick = onPlayPause) {
-                Text(text = if (isPlaying) "⏸" else "▶")
-            }
+            TextButton(onClick = onPrevious) { Text("⏮") }
+            TextButton(onClick = onPlayPause) { Text(if (isPlaying) "⏸" else "▶") }
+            TextButton(onClick = onNext) { Text("⏭") }
         }
     }
 }
