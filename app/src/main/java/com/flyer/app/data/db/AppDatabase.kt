@@ -7,19 +7,22 @@ import androidx.room.RoomDatabase
 import com.flyer.app.data.db.dao.ListeningEventDao
 import com.flyer.app.data.db.dao.TrackDao
 import com.flyer.app.data.db.dao.TrackStatsDao
+import com.flyer.app.data.db.dao.UserFeedbackDao
 import com.flyer.app.data.db.entities.CanonicalTrack
 import com.flyer.app.data.db.entities.ListeningEvent
 import com.flyer.app.data.db.entities.TrackFile
 import com.flyer.app.data.db.entities.TrackStats
+import com.flyer.app.data.db.entities.UserFeedback
 
 @Database(
     entities = [
         CanonicalTrack::class,
         TrackFile::class,
         ListeningEvent::class,
-        TrackStats::class
+        TrackStats::class,
+        UserFeedback::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -27,6 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
     abstract fun listeningEventDao(): ListeningEventDao
     abstract fun trackStatsDao(): TrackStatsDao
+    abstract fun userFeedbackDao(): UserFeedbackDao
 
     companion object {
         @Volatile

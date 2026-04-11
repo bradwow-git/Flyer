@@ -8,6 +8,12 @@ import kotlinx.coroutines.withContext
 import kotlin.math.log10
 import kotlin.math.min
 
+object FeedbackType {
+    const val LOVE = "LOVE"
+    const val HIDE = "HIDE"
+    const val NEVER_PLAY = "NEVER_PLAY"
+}
+
 class AffinityCalculator(context: Context) {
 
     private val db = AppDatabase.getInstance(context)
@@ -72,8 +78,16 @@ class AffinityCalculator(context: Context) {
         val behavioralScore = completionScore + replayScore +
                 playCountScore + recencyScore + skipPenalty
 
-        // Explicit and context scores come next phase
-        val finalScore = behavioralScore
+        // Explicit score
+        val feedback = db.userFeedbackDao().getFeedbackForTrack(canonicalTrackId)
+        val explicitScore = when (feedback?.feedbackType) {
+            FeedbackType.LOVE -> 25f
+            FeedbackType.HIDE -> -12f
+            FeedbackType.NEVER_PLAY -> -1000f
+            else -> 0f
+        }
+
+        val finalScore = behavioralScore + explicitScore
 
         statsDao.insertOrReplace(
             TrackStats(
