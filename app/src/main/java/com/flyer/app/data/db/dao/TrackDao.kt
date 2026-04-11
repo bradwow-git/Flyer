@@ -22,4 +22,7 @@ interface TrackDao {
 
     @Query("SELECT COUNT(*) FROM track_files")
     suspend fun getTrackCount(): Int
+
+    @Query("SELECT * FROM track_files")
+    suspend fun getAllTracksOnce(): List<TrackFile>
 }

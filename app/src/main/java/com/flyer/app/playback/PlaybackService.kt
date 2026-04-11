@@ -12,16 +12,19 @@ import com.flyer.app.library.ListeningEventTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import com.flyer.app.library.AffinityCalculator
 
 class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
     private lateinit var tracker: ListeningEventTracker
+    private lateinit var calculator: AffinityCalculator
     private val scope = CoroutineScope(Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
         tracker = ListeningEventTracker(this)
+        calculator = AffinityCalculator(this)
 
         val player = ExoPlayer.Builder(this)
             .setAudioAttributes(
@@ -42,7 +45,11 @@ class PlaybackService : MediaSessionService() {
                 reason: Int
             ) {
                 if (oldPosition.mediaItemIndex != newPosition.mediaItemIndex) {
+                    val trackId = tracker.currentCanonicalTrackId
                     tracker.onTrackStopped(oldPosition.positionMs)
+                    if (trackId != -1L) {
+                        scope.launch { calculator.recalculateForTrack(trackId) }
+                    }
                 }
             }
 

@@ -21,7 +21,7 @@ class ListeningEventTracker(context: Context) {
     private val dao = AppDatabase.getInstance(context).listeningEventDao()
     private val scope = CoroutineScope(Dispatchers.IO)
 
-    private var currentCanonicalTrackId: Long = -1L
+    var currentCanonicalTrackId: Long = -1L
     private var currentDurationMs: Long = 0L
     private var playStartPositionMs: Long = 0L
     private var lastTrackedTrackId: Long = -1L
