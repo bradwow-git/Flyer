@@ -51,6 +51,7 @@ import com.flyer.app.library.FeedbackType
 import com.flyer.app.library.MediaScanner
 import com.flyer.app.library.SmartShuffleEngine
 import com.flyer.app.playback.PlaybackService
+import com.flyer.app.ui.insights.InsightsScreen
 import com.flyer.app.ui.theme.FlyerTheme
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
@@ -99,6 +100,12 @@ fun FlyerApp() {
     var isPlaying by remember { mutableStateOf(false) }
     var currentTrack by remember { mutableStateOf<TrackFile?>(null) }
     val shuffleEngine = remember { SmartShuffleEngine(context) }
+    var showInsights by remember { mutableStateOf(false) }
+
+    if (showInsights) {
+        InsightsScreen(onBack = { showInsights = false })
+        return
+    }
 
     // Request permission if needed
     DisposableEffect(Unit) {
@@ -172,6 +179,7 @@ fun FlyerApp() {
                     text = "Flyer",
                     style = MaterialTheme.typography.headlineMedium
                 )
+                TextButton(onClick = { showInsights = true }) { Text("Insights") }
                 Button(onClick = {
                     scope.launch {
                         try {
