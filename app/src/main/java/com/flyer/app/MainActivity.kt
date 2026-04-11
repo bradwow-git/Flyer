@@ -36,6 +36,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.launch
 import java.io.File
+import com.flyer.app.library.SmartShuffleEngine
 
 class MainActivity : ComponentActivity() {
 
@@ -91,6 +92,7 @@ fun FlyerApp(controller: MediaController?) {
     var scanStatus by remember { mutableStateOf("") }
     var currentTrack by remember { mutableStateOf<TrackFile?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
+    val shuffleEngine = remember { SmartShuffleEngine(context) }
 
     val tracks by AppDatabase.getInstance(context)
         .trackDao()
@@ -158,11 +160,34 @@ fun FlyerApp(controller: MediaController?) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            Text(
-                text = "Flyer",
-                style = MaterialTheme.typography.headlineLarge,
-                modifier = Modifier.padding(16.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Flyer",
+                    style = MaterialTheme.typography.headlineLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = {
+                    scope.launch {
+                        val queue = shuffleEngine.buildQueue()
+                        if (queue.isNotEmpty()) {
+                            val mediaItems = queue.map { t ->
+                                MediaItem.fromUri(Uri.fromFile(File(t.filePath)))
+                            }
+                            controller?.setMediaItems(mediaItems)
+                            controller?.prepare()
+                            controller?.play()
+                            currentTrack = queue.first()
+                        }
+                    }
+                }) {
+                    Text("Smart Shuffle")
+                }
+            }
 
             if (!hasPermission) {
                 Column(

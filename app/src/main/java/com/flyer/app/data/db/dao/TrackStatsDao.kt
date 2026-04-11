@@ -21,4 +21,7 @@ interface TrackStatsDao {
 
     @Query("SELECT * FROM track_stats ORDER BY earlySkips DESC LIMIT :limit")
     suspend fun getMostSkippedTracks(limit: Int): List<TrackStats>
+
+    @Query("SELECT * FROM track_stats")
+    suspend fun getAllStatsOnce(): List<TrackStats>
 }
