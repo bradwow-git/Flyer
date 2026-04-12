@@ -22,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.flyer.app.ui.models.TrackUiModel
 
 // ── UI Models ──────────────────────────────────────────────────────────────
@@ -50,7 +49,7 @@ data class InsightsUiState(
 @Composable
 fun InsightsScreen(
     onBack: () -> Unit,
-    vm: InsightsViewModel = viewModel()
+    vm: InsightsViewModel
 ) {
     val uiState by vm.uiState.collectAsState()
 

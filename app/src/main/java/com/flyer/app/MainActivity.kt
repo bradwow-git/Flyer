@@ -43,7 +43,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import com.flyer.app.data.db.AppDatabase
 import com.flyer.app.data.db.entities.TrackFile
 import com.flyer.app.playback.PlaybackService
 import com.flyer.app.ui.home.HomeScreen
@@ -51,13 +50,14 @@ import com.flyer.app.ui.home.HomeViewModel
 import com.flyer.app.ui.home.PlayerViewModel
 import com.flyer.app.ui.insights.InsightsScreen
 import com.flyer.app.ui.insights.InsightsViewModel
+import com.flyer.app.ui.nowplaying.NowPlayingScreen
 import com.flyer.app.ui.theme.FlyerTheme
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.launch
 import java.io.File
 
-enum class Screen { HOME, LIBRARY, INSIGHTS }
+enum class Screen { HOME, LIBRARY, INSIGHTS, NOW_PLAYING }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -159,7 +159,27 @@ fun FlyerApp(
 
     // ── Screen routing ─────────────────────────────────────────────────────
 
-    if (currentScreen == Screen.INSIGHTS) {
+    if (currentScreen == Screen.NOW_PLAYING && currentTrack != null) {
+        NowPlayingScreen(
+            track = currentTrack!!,
+            isPlaying = isPlaying,
+            player = controller,
+            onBack = { currentScreen = Screen.HOME },
+            onPlayPause = {
+                if (controller?.isPlaying == true) controller?.pause()
+                else controller?.play()
+            },
+            onNext = { controller?.seekToNextMediaItem() },
+            onPrevious = { controller?.seekToPreviousMediaItem() },
+            onLove = { playerVm.loveTrack(currentTrack!!.canonicalTrackId, currentTrack!!.title) },
+            onHide = {
+                playerVm.hideTrack(currentTrack!!.canonicalTrackId, currentTrack!!.title)
+            },
+            onNeverPlay = {
+                playerVm.neverPlayTrack(currentTrack!!.canonicalTrackId, currentTrack!!.title)
+            }
+        )
+    } else if (currentScreen == Screen.INSIGHTS) {
         InsightsScreen(onBack = { currentScreen = Screen.HOME }, vm = insightsVm)
     } else {
 
@@ -251,6 +271,7 @@ fun FlyerApp(
                             }
                         )
                         Screen.INSIGHTS -> {} // handled by if/else above
+                        Screen.NOW_PLAYING -> {} // handled by if/else above
                     }
                 }
             }
@@ -261,6 +282,7 @@ fun FlyerApp(
                     NowPlayingBar(
                         track = track,
                         isPlaying = isPlaying,
+                        onExpand = { currentScreen = Screen.NOW_PLAYING },
                         onPlayPause = {
                             if (controller?.isPlaying == true) controller?.pause()
                             else controller?.play()
@@ -338,6 +360,7 @@ fun TrackRow(track: TrackFile, isPlaying: Boolean, onClick: () -> Unit) {
 fun NowPlayingBar(
     track: TrackFile,
     isPlaying: Boolean,
+    onExpand: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -349,6 +372,7 @@ fun NowPlayingBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clickable(onClick = onExpand)
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

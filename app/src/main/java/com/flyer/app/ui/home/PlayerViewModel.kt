@@ -90,4 +90,21 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+
+    fun neverPlayTrack(canonicalTrackId: Long, title: String) {
+        viewModelScope.launch {
+            try {
+                repo.insertOrReplaceFeedback(
+                    UserFeedback(
+                        canonicalTrackId = canonicalTrackId,
+                        feedbackType = FeedbackType.NEVER_PLAY
+                    )
+                )
+                affinityCalculator.recalculateForTrack(canonicalTrackId)
+                Log.d("Flyer", "Never play: $title")
+            } catch (e: Exception) {
+                Log.e("Flyer", "NeverPlay failed", e)
+            }
+        }
+    }
 }
