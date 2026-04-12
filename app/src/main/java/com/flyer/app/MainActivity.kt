@@ -43,15 +43,21 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.flyer.app.data.db.AppDatabase
 import com.flyer.app.data.db.entities.TrackFile
 import com.flyer.app.playback.PlaybackService
+import com.flyer.app.ui.home.HomeScreen
+import com.flyer.app.ui.home.HomeViewModel
 import com.flyer.app.ui.home.PlayerViewModel
 import com.flyer.app.ui.insights.InsightsScreen
+import com.flyer.app.ui.insights.InsightsViewModel
 import com.flyer.app.ui.theme.FlyerTheme
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.launch
 import java.io.File
+
+enum class Screen { HOME, LIBRARY, INSIGHTS }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,7 +73,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun FlyerApp(vm: PlayerViewModel = viewModel()) {
+fun FlyerApp(
+    playerVm: PlayerViewModel = viewModel(),
+    homeVm: HomeViewModel = viewModel(),
+    insightsVm: InsightsViewModel = viewModel()
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -87,7 +97,7 @@ fun FlyerApp(vm: PlayerViewModel = viewModel()) {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasPermission = granted
-        if (granted) vm.scanLibrary()
+        if (granted) playerVm.scanLibrary()
     }
 
     DisposableEffect(Unit) {
@@ -98,25 +108,20 @@ fun FlyerApp(vm: PlayerViewModel = viewModel()) {
         if (ContextCompat.checkSelfPermission(context, perm) != PackageManager.PERMISSION_GRANTED) {
             permissionLauncher.launch(perm)
         } else {
-            vm.scanLibrary()
+            playerVm.scanLibrary()
         }
         onDispose {}
     }
 
-    // ── Tracks from ViewModel ──────────────────────────────────────────────
-
-    val tracks by vm.tracks.collectAsState()
-
     // ── Navigation ─────────────────────────────────────────────────────────
 
-    var showInsights by remember { mutableStateOf(false) }
+    var currentScreen by remember { mutableStateOf(Screen.HOME) }
 
-    if (showInsights) {
-        InsightsScreen(onBack = { showInsights = false })
-        return
-    }
+    // ── Tracks (needed for playback lookup and Library screen) ─────────────
 
-    // ── MediaController (stays in UI layer — lifecycle-bound) ──────────────
+    val tracks by playerVm.tracks.collectAsState()
+
+    // ── MediaController (lifecycle-bound, stays in UI layer) ───────────────
 
     var controller by remember { mutableStateOf<MediaController?>(null) }
     var controllerFuture by remember { mutableStateOf<ListenableFuture<MediaController>?>(null) }
@@ -152,25 +157,51 @@ fun FlyerApp(vm: PlayerViewModel = viewModel()) {
         onDispose { controller?.removeListener(listener) }
     }
 
-    // ── UI ─────────────────────────────────────────────────────────────────
+    // ── Screen routing ─────────────────────────────────────────────────────
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
+    if (currentScreen == Screen.INSIGHTS) {
+        InsightsScreen(onBack = { currentScreen = Screen.HOME }, vm = insightsVm)
+    } else {
 
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Flyer", style = MaterialTheme.typography.headlineMedium)
-                Row {
-                    TextButton(onClick = { showInsights = true }) { Text("Insights") }
+        // ── Main layout ────────────────────────────────────────────────────────
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize()) {
+
+                // Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Flyer", style = MaterialTheme.typography.headlineMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            onClick = { currentScreen = Screen.HOME },
+                            enabled = currentScreen != Screen.HOME
+                        ) { Text("Home") }
+                        TextButton(
+                            onClick = { currentScreen = Screen.LIBRARY },
+                            enabled = currentScreen != Screen.LIBRARY
+                        ) { Text("Library") }
+                        TextButton(
+                            onClick = { currentScreen = Screen.INSIGHTS }
+                        ) { Text("Insights") }
+                    }
+                }
+
+                // Smart Shuffle button — visible on both Home and Library
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
                     Button(onClick = {
                         scope.launch {
-                            val shuffled = vm.buildShuffleQueue()
+                            val shuffled = playerVm.buildShuffleQueue()
                             if (shuffled.isNotEmpty()) {
                                 val mediaItems = shuffled.map { track ->
                                     MediaItem.fromUri(Uri.fromFile(File(track.filePath)))
@@ -182,63 +213,96 @@ fun FlyerApp(vm: PlayerViewModel = viewModel()) {
                         }
                     }) { Text("Smart Shuffle") }
                 }
+
+                // Screen content
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(bottom = if (currentTrack != null) 120.dp else 0.dp)
+                ) {
+                    when (currentScreen) {
+                        Screen.HOME -> HomeScreen(
+                            onTrackClick = { canonicalTrackId ->
+                                val track = tracks.find { it.canonicalTrackId == canonicalTrackId }
+                                if (track != null) {
+                                    val mediaItem = MediaItem.fromUri(Uri.fromFile(File(track.filePath)))
+                                    controller?.apply {
+                                        setMediaItem(mediaItem)
+                                        prepare()
+                                        play()
+                                    }
+                                    currentTrack = track
+                                }
+                            },
+                            vm = homeVm
+                        )
+                        Screen.LIBRARY -> LibraryScreen(
+                            tracks = tracks,
+                            currentTrack = currentTrack,
+                            isPlaying = isPlaying,
+                            onTrackClick = { track ->
+                                val mediaItem = MediaItem.fromUri(Uri.fromFile(File(track.filePath)))
+                                controller?.apply {
+                                    setMediaItem(mediaItem)
+                                    prepare()
+                                    play()
+                                }
+                                currentTrack = track
+                            }
+                        )
+                        Screen.INSIGHTS -> {} // handled by if/else above
+                    }
+                }
             }
 
-            // Track list
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(bottom = if (currentTrack != null) 120.dp else 0.dp)
-            ) {
-                items(tracks) { track ->
-                    TrackRow(
+            // Now Playing bar
+            currentTrack?.let { track ->
+                Box(modifier = Modifier.align(Alignment.BottomCenter)) {
+                    NowPlayingBar(
                         track = track,
-                        isPlaying = currentTrack?.filePath == track.filePath && isPlaying,
-                        onClick = {
-                            val mediaItem = MediaItem.fromUri(Uri.fromFile(File(track.filePath)))
-                            controller?.apply {
-                                setMediaItem(mediaItem)
-                                prepare()
-                                play()
-                            }
-                            currentTrack = track
+                        isPlaying = isPlaying,
+                        onPlayPause = {
+                            if (controller?.isPlaying == true) controller?.pause()
+                            else controller?.play()
+                        },
+                        onNext = { controller?.seekToNextMediaItem() },
+                        onPrevious = { controller?.seekToPreviousMediaItem() },
+                        onLove = { playerVm.loveTrack(track.canonicalTrackId, track.title) },
+                        onHide = {
+                            playerVm.hideTrack(track.canonicalTrackId, track.title)
+                            controller?.seekToNextMediaItem()
                         }
                     )
                 }
             }
         }
+    } // end else (not INSIGHTS)
+}
 
-        // Now Playing bar
-        currentTrack?.let { track ->
-            Box(modifier = Modifier.align(Alignment.BottomCenter)) {
-                NowPlayingBar(
-                    track = track,
-                    isPlaying = isPlaying,
-                    onPlayPause = {
-                        if (controller?.isPlaying == true) controller?.pause()
-                        else controller?.play()
-                    },
-                    onNext = { controller?.seekToNextMediaItem() },
-                    onPrevious = { controller?.seekToPreviousMediaItem() },
-                    onLove = { vm.loveTrack(track.canonicalTrackId, track.title) },
-                    onHide = {
-                        vm.hideTrack(track.canonicalTrackId, track.title)
-                        controller?.seekToNextMediaItem()
-                    }
-                )
-            }
+// ── Library screen (flat track list) ──────────────────────────────────────
+
+@Composable
+fun LibraryScreen(
+    tracks: List<TrackFile>,
+    currentTrack: TrackFile?,
+    isPlaying: Boolean,
+    onTrackClick: (TrackFile) -> Unit
+) {
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        items(tracks) { track ->
+            TrackRow(
+                track = track,
+                isPlaying = currentTrack?.filePath == track.filePath && isPlaying,
+                onClick = { onTrackClick(track) }
+            )
         }
     }
 }
 
-// ── Composables ────────────────────────────────────────────────────────────
+// ── Shared composables ─────────────────────────────────────────────────────
 
 @Composable
-fun TrackRow(
-    track: TrackFile,
-    isPlaying: Boolean,
-    onClick: () -> Unit
-) {
+fun TrackRow(track: TrackFile, isPlaying: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
