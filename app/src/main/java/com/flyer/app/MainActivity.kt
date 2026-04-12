@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -39,18 +38,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import com.flyer.app.data.db.AppDatabase
 import com.flyer.app.data.db.entities.TrackFile
-import com.flyer.app.data.db.entities.UserFeedback
-import com.flyer.app.library.AffinityCalculator
-import com.flyer.app.library.FeedbackType
-import com.flyer.app.library.MediaScanner
-import com.flyer.app.library.SmartShuffleEngine
 import com.flyer.app.playback.PlaybackService
+import com.flyer.app.ui.home.PlayerViewModel
 import com.flyer.app.ui.insights.InsightsScreen
 import com.flyer.app.ui.theme.FlyerTheme
 import com.google.common.util.concurrent.ListenableFuture
@@ -72,9 +67,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun FlyerApp() {
+fun FlyerApp(vm: PlayerViewModel = viewModel()) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    // ── Permission ─────────────────────────────────────────────────────────
 
     var hasPermission by remember {
         val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
@@ -88,26 +85,11 @@ fun FlyerApp() {
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted -> hasPermission = granted }
-
-    val tracks by AppDatabase.getInstance(context)
-        .trackDao()
-        .getAllTracks()
-        .collectAsState(initial = emptyList())
-
-    var controller by remember { mutableStateOf<MediaController?>(null) }
-    var controllerFuture by remember { mutableStateOf<ListenableFuture<MediaController>?>(null) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentTrack by remember { mutableStateOf<TrackFile?>(null) }
-    val shuffleEngine = remember { SmartShuffleEngine(context) }
-    var showInsights by remember { mutableStateOf(false) }
-
-    if (showInsights) {
-        InsightsScreen(onBack = { showInsights = false })
-        return
+    ) { granted ->
+        hasPermission = granted
+        if (granted) vm.scanLibrary()
     }
 
-    // Request permission if needed
     DisposableEffect(Unit) {
         val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             Manifest.permission.READ_MEDIA_AUDIO
@@ -115,26 +97,32 @@ fun FlyerApp() {
             Manifest.permission.READ_EXTERNAL_STORAGE
         if (ContextCompat.checkSelfPermission(context, perm) != PackageManager.PERMISSION_GRANTED) {
             permissionLauncher.launch(perm)
+        } else {
+            vm.scanLibrary()
         }
         onDispose {}
     }
 
-    // Scan library on startup
-    DisposableEffect(hasPermission) {
-        if (hasPermission) {
-            scope.launch {
-                try {
-                    val scanner = MediaScanner(context)
-                    scanner.scanDevice()
-                } catch (e: Exception) {
-                    Log.e("Flyer", "Scan failed", e)
-                }
-            }
-        }
-        onDispose {}
+    // ── Tracks from ViewModel ──────────────────────────────────────────────
+
+    val tracks by vm.tracks.collectAsState()
+
+    // ── Navigation ─────────────────────────────────────────────────────────
+
+    var showInsights by remember { mutableStateOf(false) }
+
+    if (showInsights) {
+        InsightsScreen(onBack = { showInsights = false })
+        return
     }
 
-    // Set up MediaController
+    // ── MediaController (stays in UI layer — lifecycle-bound) ──────────────
+
+    var controller by remember { mutableStateOf<MediaController?>(null) }
+    var controllerFuture by remember { mutableStateOf<ListenableFuture<MediaController>?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var currentTrack by remember { mutableStateOf<TrackFile?>(null) }
+
     DisposableEffect(Unit) {
         val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val future = MediaController.Builder(context, sessionToken).buildAsync()
@@ -148,7 +136,6 @@ fun FlyerApp() {
         }
     }
 
-    // Listen to playback state changes
     DisposableEffect(controller, tracks) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
@@ -165,9 +152,12 @@ fun FlyerApp() {
         onDispose { controller?.removeListener(listener) }
     }
 
+    // ── UI ─────────────────────────────────────────────────────────────────
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Header row with shuffle button
+
+            // Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -175,15 +165,12 @@ fun FlyerApp() {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Flyer",
-                    style = MaterialTheme.typography.headlineMedium
-                )
-                TextButton(onClick = { showInsights = true }) { Text("Insights") }
-                Button(onClick = {
-                    scope.launch {
-                        try {
-                            val shuffled = shuffleEngine.buildQueue()
+                Text("Flyer", style = MaterialTheme.typography.headlineMedium)
+                Row {
+                    TextButton(onClick = { showInsights = true }) { Text("Insights") }
+                    Button(onClick = {
+                        scope.launch {
+                            val shuffled = vm.buildShuffleQueue()
                             if (shuffled.isNotEmpty()) {
                                 val mediaItems = shuffled.map { track ->
                                     MediaItem.fromUri(Uri.fromFile(File(track.filePath)))
@@ -192,12 +179,8 @@ fun FlyerApp() {
                                 controller?.prepare()
                                 controller?.play()
                             }
-                        } catch (e: Exception) {
-                            Log.e("Flyer", "Shuffle failed", e)
                         }
-                    }
-                }) {
-                    Text("Smart Shuffle")
+                    }) { Text("Smart Shuffle") }
                 }
             }
 
@@ -225,7 +208,7 @@ fun FlyerApp() {
             }
         }
 
-        // Now Playing bar pinned to bottom
+        // Now Playing bar
         currentTrack?.let { track ->
             Box(modifier = Modifier.align(Alignment.BottomCenter)) {
                 NowPlayingBar(
@@ -237,44 +220,18 @@ fun FlyerApp() {
                     },
                     onNext = { controller?.seekToNextMediaItem() },
                     onPrevious = { controller?.seekToPreviousMediaItem() },
-                    onLove = {
-                        scope.launch {
-                            try {
-                                AppDatabase.getInstance(context).userFeedbackDao().insertOrReplace(
-                                    UserFeedback(
-                                        canonicalTrackId = track.canonicalTrackId,
-                                        feedbackType = FeedbackType.LOVE
-                                    )
-                                )
-                                AffinityCalculator(context).recalculateForTrack(track.canonicalTrackId)
-                                Log.d("Flyer", "Loved: ${track.title}")
-                            } catch (e: Exception) {
-                                Log.e("Flyer", "Love failed", e)
-                            }
-                        }
-                    },
+                    onLove = { vm.loveTrack(track.canonicalTrackId, track.title) },
                     onHide = {
-                        scope.launch {
-                            try {
-                                AppDatabase.getInstance(context).userFeedbackDao().insertOrReplace(
-                                    UserFeedback(
-                                        canonicalTrackId = track.canonicalTrackId,
-                                        feedbackType = FeedbackType.HIDE
-                                    )
-                                )
-                                AffinityCalculator(context).recalculateForTrack(track.canonicalTrackId)
-                                controller?.seekToNextMediaItem()
-                                Log.d("Flyer", "Hidden: ${track.title}")
-                            } catch (e: Exception) {
-                                Log.e("Flyer", "Hide failed", e)
-                            }
-                        }
+                        vm.hideTrack(track.canonicalTrackId, track.title)
+                        controller?.seekToNextMediaItem()
                     }
                 )
             }
         }
     }
 }
+
+// ── Composables ────────────────────────────────────────────────────────────
 
 @Composable
 fun TrackRow(
@@ -323,10 +280,7 @@ fun NowPlayingBar(
     onLove: () -> Unit,
     onHide: () -> Unit
 ) {
-    Surface(
-        tonalElevation = 8.dp,
-        shadowElevation = 8.dp
-    ) {
+    Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
         Column {
             Row(
                 modifier = Modifier
@@ -335,11 +289,7 @@ fun NowPlayingBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = track.title,
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1
-                    )
+                    Text(text = track.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
                     Text(
                         text = track.artist,
                         style = MaterialTheme.typography.bodyMedium,
