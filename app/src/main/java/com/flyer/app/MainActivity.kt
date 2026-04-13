@@ -273,9 +273,13 @@ fun FlyerApp(
                             onTrackClick = { canonicalTrackId ->
                                 val track = tracks.find { it.canonicalTrackId == canonicalTrackId }
                                 if (track != null) {
-                                    val mediaItem = MediaItem.fromUri(Uri.fromFile(File(track.filePath)))
+                                    val startIndex = tracks.indexOfFirst { it.canonicalTrackId == canonicalTrackId }
+                                    val ordered = if (startIndex >= 0)
+                                        tracks.drop(startIndex) + tracks.take(startIndex)
+                                    else tracks
+                                    val mediaItems = ordered.map { MediaItem.fromUri(Uri.fromFile(File(it.filePath))) }
                                     controller?.apply {
-                                        setMediaItem(mediaItem)
+                                        setMediaItems(mediaItems)
                                         prepare()
                                         play()
                                     }
@@ -289,9 +293,13 @@ fun FlyerApp(
                             currentTrack = currentTrack,
                             isPlaying = isPlaying,
                             onTrackClick = { track ->
-                                val mediaItem = MediaItem.fromUri(Uri.fromFile(File(track.filePath)))
+                                val startIndex = tracks.indexOfFirst { it.filePath == track.filePath }
+                                val ordered = if (startIndex >= 0)
+                                    tracks.drop(startIndex) + tracks.take(startIndex)
+                                else tracks
+                                val mediaItems = ordered.map { MediaItem.fromUri(Uri.fromFile(File(it.filePath))) }
                                 controller?.apply {
-                                    setMediaItem(mediaItem)
+                                    setMediaItems(mediaItems)
                                     prepare()
                                     play()
                                 }
