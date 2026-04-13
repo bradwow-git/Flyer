@@ -19,4 +19,7 @@ interface ListeningEventDao {
 
     @Query("SELECT COUNT(*) FROM listening_events")
     suspend fun getTotalEventCount(): Int
+
+    @Query("SELECT * FROM listening_events ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentEvents(limit: Int): List<ListeningEvent>
 }

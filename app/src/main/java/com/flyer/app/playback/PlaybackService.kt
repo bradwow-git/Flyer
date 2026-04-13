@@ -53,6 +53,18 @@ class PlaybackService : MediaSessionService() {
                 }
             }
 
+            // Handles the case where the last track in the queue plays to completion.
+            // onPositionDiscontinuity only fires on item transitions, not on STATE_ENDED.
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    val trackId = tracker.currentCanonicalTrackId
+                    if (trackId != -1L) {
+                        tracker.onTrackStopped(player.duration.coerceAtLeast(0L))
+                        scope.launch { calculator.recalculateForTrack(trackId) }
+                    }
+                }
+            }
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 val uri = mediaItem?.localConfiguration?.uri?.toString() ?: return
                 val filePath = android.net.Uri.parse(uri).path ?: return
@@ -80,8 +92,10 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         mediaSession?.run {
-            if (player.currentMediaItem != null) {
+            val trackId = tracker.currentCanonicalTrackId
+            if (player.currentMediaItem != null && trackId != -1L) {
                 tracker.onTrackStopped(player.currentPosition)
+                scope.launch { calculator.recalculateForTrack(trackId) }
             }
             player.release()
             release()

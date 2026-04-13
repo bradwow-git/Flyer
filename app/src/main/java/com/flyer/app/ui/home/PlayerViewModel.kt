@@ -57,6 +57,16 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     // ── Feedback ───────────────────────────────────────────────────────────
 
+    /** Returns the current feedback type string ("LOVE", "HIDE", "NEVER_PLAY") or null. */
+    suspend fun getFeedbackType(canonicalTrackId: Long): String? {
+        return try {
+            repo.getFeedbackForTrack(canonicalTrackId)?.feedbackType
+        } catch (e: Exception) {
+            Log.e("Flyer", "GetFeedback failed", e)
+            null
+        }
+    }
+
     fun loveTrack(canonicalTrackId: Long, title: String) {
         viewModelScope.launch {
             try {
@@ -104,6 +114,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 Log.d("Flyer", "Never play: $title")
             } catch (e: Exception) {
                 Log.e("Flyer", "NeverPlay failed", e)
+            }
+        }
+    }
+
+    /** Removes any explicit feedback, returning the track to neutral. */
+    fun removeFeedback(canonicalTrackId: Long, title: String) {
+        viewModelScope.launch {
+            try {
+                repo.deleteFeedbackForTrack(canonicalTrackId)
+                affinityCalculator.recalculateForTrack(canonicalTrackId)
+                Log.d("Flyer", "Feedback removed: $title")
+            } catch (e: Exception) {
+                Log.e("Flyer", "RemoveFeedback failed", e)
             }
         }
     }

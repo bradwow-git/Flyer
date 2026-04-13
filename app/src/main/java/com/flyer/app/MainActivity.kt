@@ -10,7 +10,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,21 +20,30 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.layout.ContentScale
+import com.flyer.app.ui.nowplaying.loadAlbumArt
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -43,6 +54,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.flyer.app.data.db.AppDatabase
 import com.flyer.app.data.db.entities.TrackFile
 import com.flyer.app.playback.PlaybackService
 import com.flyer.app.ui.home.HomeScreen
@@ -127,6 +139,12 @@ fun FlyerApp(
     var controllerFuture by remember { mutableStateOf<ListenableFuture<MediaController>?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
     var currentTrack by remember { mutableStateOf<TrackFile?>(null) }
+    var currentFeedbackType by remember { mutableStateOf<String?>(null) }
+
+    // Reload feedback state whenever the playing track changes
+    LaunchedEffect(currentTrack?.canonicalTrackId) {
+        currentFeedbackType = currentTrack?.let { playerVm.getFeedbackType(it.canonicalTrackId) }
+    }
 
     DisposableEffect(Unit) {
         val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -164,6 +182,7 @@ fun FlyerApp(
             track = currentTrack!!,
             isPlaying = isPlaying,
             player = controller,
+            initialFeedbackType = currentFeedbackType,
             onBack = { currentScreen = Screen.HOME },
             onPlayPause = {
                 if (controller?.isPlaying == true) controller?.pause()
@@ -171,12 +190,21 @@ fun FlyerApp(
             },
             onNext = { controller?.seekToNextMediaItem() },
             onPrevious = { controller?.seekToPreviousMediaItem() },
-            onLove = { playerVm.loveTrack(currentTrack!!.canonicalTrackId, currentTrack!!.title) },
+            onLove = {
+                playerVm.loveTrack(currentTrack!!.canonicalTrackId, currentTrack!!.title)
+                currentFeedbackType = "LOVE"
+            },
+            onRemoveFeedback = {
+                playerVm.removeFeedback(currentTrack!!.canonicalTrackId, currentTrack!!.title)
+                currentFeedbackType = null
+            },
             onHide = {
                 playerVm.hideTrack(currentTrack!!.canonicalTrackId, currentTrack!!.title)
+                currentFeedbackType = "HIDE"
             },
             onNeverPlay = {
                 playerVm.neverPlayTrack(currentTrack!!.canonicalTrackId, currentTrack!!.title)
+                currentFeedbackType = "NEVER_PLAY"
             }
         )
     } else if (currentScreen == Screen.INSIGHTS) {
@@ -282,6 +310,7 @@ fun FlyerApp(
                     NowPlayingBar(
                         track = track,
                         isPlaying = isPlaying,
+                        feedbackType = currentFeedbackType,
                         onExpand = { currentScreen = Screen.NOW_PLAYING },
                         onPlayPause = {
                             if (controller?.isPlaying == true) controller?.pause()
@@ -289,7 +318,10 @@ fun FlyerApp(
                         },
                         onNext = { controller?.seekToNextMediaItem() },
                         onPrevious = { controller?.seekToPreviousMediaItem() },
-                        onLove = { playerVm.loveTrack(track.canonicalTrackId, track.title) },
+                        onLove = {
+                            playerVm.loveTrack(track.canonicalTrackId, track.title)
+                            currentFeedbackType = "LOVE"
+                        },
                         onHide = {
                             playerVm.hideTrack(track.canonicalTrackId, track.title)
                             controller?.seekToNextMediaItem()
@@ -301,7 +333,7 @@ fun FlyerApp(
     } // end else (not INSIGHTS)
 }
 
-// ── Library screen (flat track list) ──────────────────────────────────────
+// ── Library screen (with search) ──────────────────────────────────────────
 
 @Composable
 fun LibraryScreen(
@@ -310,13 +342,82 @@ fun LibraryScreen(
     isPlaying: Boolean,
     onTrackClick: (TrackFile) -> Unit
 ) {
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(tracks) { track ->
-            TrackRow(
-                track = track,
-                isPlaying = currentTrack?.filePath == track.filePath && isPlaying,
-                onClick = { onTrackClick(track) }
+    var query by remember { mutableStateOf("") }
+
+    val filtered = remember(query, tracks) {
+        if (query.isBlank()) tracks
+        else {
+            val q = query.trim().lowercase()
+            tracks.filter { track ->
+                track.title.lowercase().contains(q) ||
+                        track.artist.lowercase().contains(q) ||
+                        track.album.lowercase().contains(q)
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+
+        // ── Search bar ─────────────────────────────────────────────────────
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            placeholder = { Text("Search songs, artists, albums…") },
+            leadingIcon = { Text("🔍", modifier = Modifier.padding(start = 4.dp)) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    TextButton(onClick = { query = "" }) { Text("✕") }
+                }
+            },
+            singleLine = true
+        )
+
+        // ── Result count ───────────────────────────────────────────────────
+        if (query.isNotBlank()) {
+            Text(
+                text = "${filtered.size} result${if (filtered.size != 1) "s" else ""}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)
             )
+            HorizontalDivider()
+        }
+
+        // ── Empty state ────────────────────────────────────────────────────
+        if (filtered.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = if (query.isBlank()) "No tracks in library"
+                        else "No results for \"$query\"",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    if (query.isNotBlank()) {
+                        Text(
+                            text = "Try a different song, artist, or album",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(filtered, key = { it.filePath }) { track ->
+                    TrackRow(
+                        track = track,
+                        isPlaying = currentTrack?.filePath == track.filePath && isPlaying,
+                        onClick = { onTrackClick(track) }
+                    )
+                }
+            }
         }
     }
 }
@@ -360,6 +461,7 @@ fun TrackRow(track: TrackFile, isPlaying: Boolean, onClick: () -> Unit) {
 fun NowPlayingBar(
     track: TrackFile,
     isPlaying: Boolean,
+    feedbackType: String? = null,
     onExpand: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -367,6 +469,12 @@ fun NowPlayingBar(
     onLove: () -> Unit,
     onHide: () -> Unit
 ) {
+    val isLoved = feedbackType == "LOVE"
+    val loveColor = if (isLoved) androidx.compose.ui.graphics.Color(0xFFE91E63)
+    else MaterialTheme.colorScheme.onSurfaceVariant
+    var albumArt by remember(track.filePath) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(track.filePath) { albumArt = loadAlbumArt(track.filePath) }
+
     Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
         Column {
             Row(
@@ -376,7 +484,30 @@ fun NowPlayingBar(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                // Thumbnail
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (albumArt != null) {
+                        androidx.compose.foundation.Image(
+                            painter = BitmapPainter(albumArt!!),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text("♪", style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                }
+
+                Column(modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp)) {
                     Text(text = track.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
                     Text(
                         text = track.artist,
@@ -395,8 +526,15 @@ fun NowPlayingBar(
                     .padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.End
             ) {
-                TextButton(onClick = onLove) { Text("♥ Love") }
-                TextButton(onClick = onHide) { Text("✕ Hide") }
+                TextButton(onClick = onLove) {
+                    Text(
+                        text = if (isLoved) "♥ Loved" else "♡ Love",
+                        color = loveColor
+                    )
+                }
+                TextButton(onClick = onHide) {
+                    Text("✕ Hide", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }

@@ -17,4 +17,7 @@ interface UserFeedbackDao {
 
     @Query("DELETE FROM user_feedback WHERE canonicalTrackId = :trackId")
     suspend fun clearFeedback(trackId: Long)
+
+    @Query("DELETE FROM user_feedback WHERE canonicalTrackId = :trackId")
+    suspend fun deleteFeedbackForTrack(trackId: Long)
 }

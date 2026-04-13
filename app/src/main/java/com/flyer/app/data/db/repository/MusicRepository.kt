@@ -31,4 +31,10 @@ class MusicRepository(private val db: AppDatabase) {
 
     suspend fun insertOrReplaceFeedback(feedback: UserFeedback) =
         db.userFeedbackDao().insertOrReplace(feedback)
+
+    suspend fun getFeedbackForTrack(canonicalTrackId: Long): UserFeedback? =
+        db.userFeedbackDao().getFeedbackForTrack(canonicalTrackId)
+
+    suspend fun deleteFeedbackForTrack(canonicalTrackId: Long) =
+        db.userFeedbackDao().deleteFeedbackForTrack(canonicalTrackId)
 }
